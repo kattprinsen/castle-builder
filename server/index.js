@@ -18,7 +18,8 @@ const db = new sqlite3.Database('./castle.db', (err) => {
 
 db.run(`CREATE TABLE IF NOT EXISTS castles (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL    
+    name TEXT NOT NULL,
+    slug TEXT NOT NULL UNIQUE
 )`);
 
 // GET ALL CASTLES
@@ -32,17 +33,43 @@ app.get('/api/castles', (req, res) => {
     });
 });
 
+// Slugify utility
+function toSlug(str) {
+    return str
+        .toLowerCase()
+        .trim()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+}
+
 app.post('/api/castles', (req, res) => {
     const { name } = req.body;
     if(!name) {
         return res.status(400).json({ error: 'Name is required' });
     }
-    db.run('INSERT INTO castles (name) VALUES (?)', [name], function(err) {
-        if(err) {
-            return res.status(500).json({ error: err.message });
-        }
-        res.status(201).json({ id: this.lastID, name });
-    });
+    // Generate unique slug
+    const baseSlug = toSlug(name);
+    let slug = baseSlug;
+    let i = 1;
+    function insertWithUniqueSlug() {
+        db.get('SELECT 1 FROM castles WHERE slug = ?', [slug], (err, row) => {
+            if (err) {
+                return res.status(500).json({ error: err.message });
+            }
+            if (row) {
+                slug = `${baseSlug}-${i++}`;
+                insertWithUniqueSlug();
+            } else {
+                db.run('INSERT INTO castles (name, slug) VALUES (?, ?)', [name, slug], function(err) {
+                    if(err) {
+                        return res.status(500).json({ error: err.message });
+                    }
+                    res.status(201).json({ id: this.lastID, name, slug });
+                });
+            }
+        });
+    }
+    insertWithUniqueSlug();
 });
 
 app.listen(PORT, () => {
